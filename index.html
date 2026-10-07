@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Xfinity Media | Customer Contact</title>
+  <meta name="description" content="Share your contact details with Xfinity Media." />
+  <style>
+    :root { --green:#8cc63f; --ink:#111; --muted:#6b7280; --line:#e5e7eb; --bg:#f7f7f5; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:linear-gradient(180deg,#fff 0,var(--bg) 100%); color:var(--ink); min-height:100vh; }
+    .wrap { max-width:680px; margin:0 auto; padding:42px 20px 64px; }
+    .brand { display:flex; align-items:center; gap:12px; margin-bottom:30px; }
+    .mark { width:44px; height:44px; border-radius:12px; background:var(--ink); position:relative; box-shadow:0 8px 22px rgba(0,0,0,.12); }
+    .mark::after { content:"X"; position:absolute; inset:0; display:grid; place-items:center; color:var(--green); font-weight:900; font-size:25px; }
+    .brandtext { font-weight:800; letter-spacing:-.02em; font-size:20px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:22px; padding:30px; box-shadow:0 18px 50px rgba(17,17,17,.07); }
+    h1 { font-size:32px; line-height:1.1; margin:0 0 10px; letter-spacing:-.035em; }
+    p { color:var(--muted); line-height:1.55; margin:0 0 26px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .full { grid-column:1/-1; }
+    label { display:block; font-size:13px; font-weight:750; margin:0 0 7px; }
+    input,textarea { width:100%; border:1px solid #d7dbe0; border-radius:12px; padding:13px 14px; font:inherit; background:#fff; outline:none; transition:.15s; }
+    input:focus,textarea:focus { border-color:#9ccf58; box-shadow:0 0 0 3px rgba(140,198,63,.14); }
+    textarea { min-height:92px; resize:vertical; }
+    .hint { font-size:12px; color:#8a9199; margin-top:6px; }
+    .hidden { position:absolute; left:-9999px; opacity:0; pointer-events:none; }
+    button { width:100%; border:0; border-radius:12px; padding:14px 18px; font:inherit; font-weight:800; background:var(--ink); color:#fff; cursor:pointer; margin-top:22px; transition:.15s; }
+    button:hover { transform:translateY(-1px); box-shadow:0 8px 20px rgba(17,17,17,.15); }
+    button:disabled { opacity:.55; cursor:not-allowed; transform:none; box-shadow:none; }
+    .status { display:none; margin-top:16px; padding:13px 14px; border-radius:12px; font-size:14px; }
+    .status.ok { display:block; background:#eef8e4; color:#365d0d; border:1px solid #cfe7ae; }
+    .status.err { display:block; background:#fff2f2; color:#8a1c1c; border:1px solid #f3c1c1; }
+    .fine { font-size:12px; color:#8b929b; text-align:center; margin-top:18px; }
+    @media (max-width:600px) { .wrap{padding-top:24px}.card{padding:22px}.grid{grid-template-columns:1fr}.full{grid-column:auto}h1{font-size:28px} }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand"><div class="mark" aria-hidden="true"></div><div class="brandtext">Xfinity Media</div></div>
+    <section class="card">
+      <h1>Share your contact details</h1>
+      <p>Fill this out once and our team will have your information ready for quotes, orders and invoices.</p>
+      <form id="contactForm">
+        <div class="grid">
+          <div class="full">
+            <label for="name">Customer / Company Name *</label>
+            <input id="name" name="name" maxlength="150" required autocomplete="organization" placeholder="Your name or business name" />
+          </div>
+          <div>
+            <label for="contact_name">Contact Name</label>
+            <input id="contact_name" name="contact_name" maxlength="150" autocomplete="name" placeholder="Main contact" />
+          </div>
+          <div>
+            <label for="phone">Phone</label>
+            <input id="phone" name="phone" maxlength="60" autocomplete="tel" inputmode="tel" placeholder="604-555-0123" />
+          </div>
+          <div class="full">
+            <label for="email">Email</label>
+            <input id="email" name="email" maxlength="200" type="email" autocomplete="email" placeholder="name@company.ca" />
+            <div class="hint">Please provide at least an email address or phone number.</div>
+          </div>
+          <div class="full">
+            <label for="address">Address</label>
+            <textarea id="address" name="address" maxlength="300" autocomplete="street-address" placeholder="Street, city, province, postal code"></textarea>
+          </div>
+          <div class="hidden" aria-hidden="true">
+            <label for="website">Website</label>
+            <input id="website" name="website" tabindex="-1" autocomplete="off" />
+          </div>
+        </div>
+        <button id="submitBtn" type="submit">Submit Contact Details</button>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </form>
+    </section>
+    <div class="fine">Your information is sent securely to Xfinity Media and is not displayed publicly.</div>
+  </main>
+  <script>
+    const SUPABASE_URL = 'https://tewiyvnftjowcplnhdce.supabase.co';
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_6TK07QQyLZWGGj1ZZpbkvg_mTXGheF2';
+    const form = document.getElementById('contactForm');
+    const button = document.getElementById('submitBtn');
+    const statusEl = document.getElementById('status');
+
+    function showStatus(message, ok) {
+      statusEl.textContent = message;
+      statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      statusEl.className = 'status';
+
+      const data = new FormData(form);
+      const payload = {
+        name: String(data.get('name') || '').trim(),
+        contact_name: String(data.get('contact_name') || '').trim() || null,
+        email: String(data.get('email') || '').trim().toLowerCase() || null,
+        phone: String(data.get('phone') || '').trim() || null,
+        address: String(data.get('address') || '').trim() || null,
+        website: String(data.get('website') || '')
+      };
+
+      if (!payload.name) return showStatus('Please enter your name or business name.', false);
+      if (!payload.email && !payload.phone) return showStatus('Please provide an email address or phone number.', false);
+
+      button.disabled = true;
+      button.textContent = 'Submitting…';
+
+      try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/customer_contact_submissions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_PUBLISHABLE_KEY,
+            Prefer: 'return=minimal'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) throw new Error('Submission failed');
+        form.reset();
+        showStatus('Thank you — your contact details have been submitted.', true);
+      } catch (error) {
+        showStatus('We could not submit your details. Please try again or contact Xfinity Media.', false);
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Submit Contact Details';
+      }
+    });
+  </script>
+</body>
+</html>
