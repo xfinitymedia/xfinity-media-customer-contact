@@ -4,16 +4,25 @@ import { useState } from 'react';
 
 const SUPABASE_URL = 'https://tewiyvnftjowcplnhdce.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_6TK07QQyLZWGGj1ZZpbkvg_mTXGheF2';
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const ALLOWED_EXTENSIONS = ['pdf','png','jpg','jpeg','webp','svg','ai','eps','zip'];
+
+function safeFileName(name) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180);
+}
 
 export default function Page() {
   const [status, setStatus] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [files, setFiles] = useState([]);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setStatus(null);
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     const payload = {
+      id: crypto.randomUUID(),
       name: String(data.get('name') || '').trim(),
       contact_name: String(data.get('contact_name') || '').trim() || null,
       email: String(data.get('email') || '').trim().toLowerCase() || null,
@@ -22,31 +31,57 @@ export default function Page() {
       website: String(data.get('website') || '')
     };
 
-    if (!payload.name) {
-      setStatus({ ok: false, message: 'Please enter your name or business name.' });
-      return;
-    }
-    if (!payload.email && !payload.phone) {
-      setStatus({ ok: false, message: 'Please provide an email address or phone number.' });
-      return;
+    if (!payload.name) return setStatus({ ok:false, message:'Please enter your name or business name.' });
+    if (!payload.email && !payload.phone) return setStatus({ ok:false, message:'Please provide an email address or phone number.' });
+
+    for (const file of files) {
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      if (!ALLOWED_EXTENSIONS.includes(ext)) return setStatus({ ok:false, message:`${file.name}: unsupported file type.` });
+      if (file.size > MAX_FILE_SIZE) return setStatus({ ok:false, message:`${file.name}: files must be 25 MB or smaller.` });
     }
 
     setSubmitting(true);
     try {
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/customer_contact_submissions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: SUPABASE_PUBLISHABLE_KEY,
-          Prefer: 'return=minimal'
-        },
-        body: JSON.stringify(payload)
+      const headers = { apikey: SUPABASE_PUBLISHABLE_KEY };
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/customer_contact_submissions?select=id,customer_id`, {
+        method:'POST',
+        headers:{ ...headers, 'Content-Type':'application/json', Prefer:'return=representation' },
+        body:JSON.stringify(payload)
       });
-      if (!response.ok) throw new Error('Submission failed');
-      event.currentTarget.reset();
-      setStatus({ ok: true, message: 'Thank you — your contact details have been submitted.' });
+      if (!response.ok) throw new Error('Contact submission failed');
+      const [submission] = await response.json();
+
+      for (const file of files) {
+        const path = `${submission.id}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
+        const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/customer-uploads/${encodeURIComponent(path).replace(/%2F/g,'/')}`, {
+          method:'POST',
+          headers:{ ...headers, 'Content-Type':file.type || 'application/octet-stream', 'x-upsert':'false' },
+          body:file
+        });
+        if (!upload.ok) throw new Error(`Could not upload ${file.name}`);
+
+        const meta = await fetch(`${SUPABASE_URL}/rest/v1/customer_uploads`, {
+          method:'POST',
+          headers:{ ...headers, 'Content-Type':'application/json', Prefer:'return=minimal' },
+          body:JSON.stringify({
+            submission_id:submission.id,
+            customer_id:submission.customer_id,
+            storage_path:path,
+            file_name:file.name,
+            file_size:file.size,
+            mime_type:file.type || null,
+            category:'Customer Uploads',
+            sync_status:'pending'
+          })
+        });
+        if (!meta.ok) throw new Error(`Could not register ${file.name}`);
+      }
+
+      form.reset();
+      setFiles([]);
+      setStatus({ ok:true, message:files.length ? 'Thank you — your contact details and files have been submitted.' : 'Thank you — your contact details have been submitted.' });
     } catch {
-      setStatus({ ok: false, message: 'We could not submit your details. Please try again or contact Xfinity Media.' });
+      setStatus({ ok:false, message:'We could not complete your submission. Please try again or contact Xfinity Media.' });
     } finally {
       setSubmitting(false);
     }
@@ -57,7 +92,7 @@ export default function Page() {
       <div className="brand"><div className="mark" aria-hidden="true"/><div className="brandtext">Xfinity Media</div></div>
       <section className="card">
         <h1>Share your contact details</h1>
-        <p>Fill this out once and our team will have your information ready for quotes, orders and invoices.</p>
+        <p>Fill this out once and our team will have your information ready for quotes, orders and invoices. You can also send us artwork or other order files.</p>
         <form onSubmit={handleSubmit}>
           <div className="grid">
             <div className="full"><label htmlFor="name">Customer / Company Name *</label><input id="name" name="name" maxLength="150" required autoComplete="organization" placeholder="Your name or business name" /></div>
@@ -65,13 +100,19 @@ export default function Page() {
             <div><label htmlFor="phone">Phone</label><input id="phone" name="phone" maxLength="60" autoComplete="tel" inputMode="tel" placeholder="604-555-0123" /></div>
             <div className="full"><label htmlFor="email">Email</label><input id="email" name="email" maxLength="200" type="email" autoComplete="email" placeholder="name@company.ca" /><div className="hint">Please provide at least an email address or phone number.</div></div>
             <div className="full"><label htmlFor="address">Address</label><textarea id="address" name="address" maxLength="300" autoComplete="street-address" placeholder="Street, city, province, postal code" /></div>
+            <div className="full upload-field">
+              <label htmlFor="files">Upload Artwork / Files</label>
+              <input id="files" name="files" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.svg,.ai,.eps,.zip" onChange={(e)=>setFiles(Array.from(e.target.files || []))} />
+              <div className="hint">Optional. PDF, PNG, JPG, SVG, AI, EPS or ZIP. Maximum 25 MB per file.</div>
+              {files.length > 0 && <div className="file-list">{files.map((file)=><div key={file.name + file.size}>{file.name} <span>{(file.size/1024/1024).toFixed(1)} MB</span></div>)}</div>}
+            </div>
             <div className="hidden" aria-hidden="true"><label htmlFor="website">Website</label><input id="website" name="website" tabIndex="-1" autoComplete="off" /></div>
           </div>
-          <button type="submit" disabled={submitting}>{submitting ? 'Submitting…' : 'Submit Contact Details'}</button>
+          <button type="submit" disabled={submitting}>{submitting ? 'Submitting…' : files.length ? 'Submit Contact Details & Files' : 'Submit Contact Details'}</button>
           {status && <div className={`status ${status.ok ? 'ok' : 'err'}`} role="status" aria-live="polite">{status.message}</div>}
         </form>
       </section>
-      <div className="fine">Your information is sent securely to Xfinity Media and is not displayed publicly.</div>
+      <div className="fine">Your information and uploaded files are sent securely to Xfinity Media and are not displayed publicly.</div>
     </main>
   );
 }
