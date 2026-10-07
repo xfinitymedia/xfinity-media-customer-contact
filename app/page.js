@@ -43,16 +43,15 @@ export default function Page() {
     setSubmitting(true);
     try {
       const headers = { apikey: SUPABASE_PUBLISHABLE_KEY };
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/customer_contact_submissions?select=id,customer_id`, {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/customer_contact_submissions`, {
         method:'POST',
-        headers:{ ...headers, 'Content-Type':'application/json', Prefer:'return=representation' },
+        headers:{ ...headers, 'Content-Type':'application/json', Prefer:'return=minimal' },
         body:JSON.stringify(payload)
       });
       if (!response.ok) throw new Error('Contact submission failed');
-      const [submission] = await response.json();
 
       for (const file of files) {
-        const path = `${submission.id}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
+        const path = `${payload.id}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
         const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/customer-uploads/${encodeURIComponent(path).replace(/%2F/g,'/')}`, {
           method:'POST',
           headers:{ ...headers, 'Content-Type':file.type || 'application/octet-stream', 'x-upsert':'false' },
@@ -64,8 +63,7 @@ export default function Page() {
           method:'POST',
           headers:{ ...headers, 'Content-Type':'application/json', Prefer:'return=minimal' },
           body:JSON.stringify({
-            submission_id:submission.id,
-            customer_id:submission.customer_id,
+            submission_id:payload.id,
             storage_path:path,
             file_name:file.name,
             file_size:file.size,
