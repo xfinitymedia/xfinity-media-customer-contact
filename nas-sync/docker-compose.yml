@@ -1,0 +1,13 @@
+services:
+  xfinity-nas-sync:
+    build: .
+    restart: unless-stopped
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      NAS_ROOT: /data/Customers
+      POLL_SECONDS: 30
+      BATCH_SIZE: 5
+      DELETE_STAGING_AFTER_SYNC: "false"
+    volumes:
+      - ${NAS_CUSTOMERS_PATH}:/data/Customers
