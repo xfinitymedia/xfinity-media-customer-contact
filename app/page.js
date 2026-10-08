@@ -11,10 +11,26 @@ function safeFileName(name) {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180);
 }
 
+function fileKey(file) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
 export default function Page() {
   const [status, setStatus] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [files, setFiles] = useState([]);
+
+  function addFiles(selectedFiles) {
+    const incoming = Array.from(selectedFiles || []);
+    setFiles((current) => {
+      const existing = new Set(current.map(fileKey));
+      return [...current, ...incoming.filter((file) => !existing.has(fileKey(file)))];
+    });
+  }
+
+  function removeFile(key) {
+    setFiles((current) => current.filter((file) => fileKey(file) !== key));
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -76,8 +92,9 @@ export default function Page() {
       }
 
       form.reset();
+      const uploadedCount = files.length;
       setFiles([]);
-      setStatus({ ok:true, message:files.length ? 'Thank you — your contact details and files have been submitted.' : 'Thank you — your contact details have been submitted.' });
+      setStatus({ ok:true, message:uploadedCount ? `Thank you — your contact details and ${uploadedCount} file${uploadedCount === 1 ? '' : 's'} have been submitted.` : 'Thank you — your contact details have been submitted.' });
     } catch {
       setStatus({ ok:false, message:'We could not complete your submission. Please try again or contact Xfinity Media.' });
     } finally {
@@ -100,13 +117,25 @@ export default function Page() {
             <div className="full"><label htmlFor="address">Address</label><textarea id="address" name="address" maxLength="300" autoComplete="street-address" placeholder="Street, city, province, postal code" /></div>
             <div className="full upload-field">
               <label htmlFor="files">Upload Artwork / Files</label>
-              <input id="files" name="files" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.svg,.ai,.eps,.zip" onChange={(e)=>setFiles(Array.from(e.target.files || []))} />
-              <div className="hint">Optional. PDF, PNG, JPG, SVG, AI, EPS or ZIP. Maximum 25 MB per file.</div>
-              {files.length > 0 && <div className="file-list">{files.map((file)=><div key={file.name + file.size}>{file.name} <span>{(file.size/1024/1024).toFixed(1)} MB</span></div>)}</div>}
+              <input id="files" name="files" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.svg,.ai,.eps,.zip" onChange={(e)=>{ addFiles(e.target.files); e.target.value=''; }} />
+              <div className="hint">Optional. Select multiple files at once, or choose files again to add more. PDF, PNG, JPG, SVG, AI, EPS or ZIP. Maximum 25 MB per file.</div>
+              {files.length > 0 && (
+                <div className="selected-files">
+                  <div className="selected-files-header">{files.length} file{files.length === 1 ? '' : 's'} selected</div>
+                  <div className="file-list">
+                    {files.map((file)=>(
+                      <div key={fileKey(file)} className="file-row">
+                        <div className="file-info"><strong>{file.name}</strong><span>{(file.size/1024/1024).toFixed(1)} MB</span></div>
+                        <button type="button" className="remove-file" onClick={()=>removeFile(fileKey(file))}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="hidden" aria-hidden="true"><label htmlFor="website">Website</label><input id="website" name="website" tabIndex="-1" autoComplete="off" /></div>
           </div>
-          <button type="submit" disabled={submitting}>{submitting ? 'Submitting…' : files.length ? 'Submit Contact Details & Files' : 'Submit Contact Details'}</button>
+          <button type="submit" disabled={submitting}>{submitting ? 'Submitting…' : files.length ? `Submit Contact Details & ${files.length} File${files.length === 1 ? '' : 's'}` : 'Submit Contact Details'}</button>
           {status && <div className={`status ${status.ok ? 'ok' : 'err'}`} role="status" aria-live="polite">{status.message}</div>}
         </form>
       </section>
