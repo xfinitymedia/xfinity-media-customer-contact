@@ -19,6 +19,7 @@ export default function Page() {
   const [status, setStatus] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [files, setFiles] = useState([]);
+  const [fileNotes, setFileNotes] = useState({});
 
   function addFiles(selectedFiles) {
     const incoming = Array.from(selectedFiles || []);
@@ -30,6 +31,15 @@ export default function Page() {
 
   function removeFile(key) {
     setFiles((current) => current.filter((file) => fileKey(file) !== key));
+    setFileNotes((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function updateFileNote(key, value) {
+    setFileNotes((current) => ({ ...current, [key]: value }));
   }
 
   async function handleSubmit(event) {
@@ -67,6 +77,7 @@ export default function Page() {
       if (!response.ok) throw new Error('Contact submission failed');
 
       for (const file of files) {
+        const key = fileKey(file);
         const path = `${payload.id}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
         const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/customer-uploads/${encodeURIComponent(path).replace(/%2F/g,'/')}`, {
           method:'POST',
@@ -84,6 +95,7 @@ export default function Page() {
             file_name:file.name,
             file_size:file.size,
             mime_type:file.type || null,
+            notes:String(fileNotes[key] || '').trim() || null,
             category:'Customer Uploads',
             sync_status:'pending'
           })
@@ -94,6 +106,7 @@ export default function Page() {
       form.reset();
       const uploadedCount = files.length;
       setFiles([]);
+      setFileNotes({});
       setStatus({ ok:true, message:uploadedCount ? `Thank you — your contact details and ${uploadedCount} file${uploadedCount === 1 ? '' : 's'} have been submitted.` : 'Thank you — your contact details have been submitted.' });
     } catch {
       setStatus({ ok:false, message:'We could not complete your submission. Please try again or contact Xfinity Media.' });
@@ -123,12 +136,21 @@ export default function Page() {
                 <div className="selected-files">
                   <div className="selected-files-header">{files.length} file{files.length === 1 ? '' : 's'} selected</div>
                   <div className="file-list">
-                    {files.map((file)=>(
-                      <div key={fileKey(file)} className="file-row">
-                        <div className="file-info"><strong>{file.name}</strong><span>{(file.size/1024/1024).toFixed(1)} MB</span></div>
-                        <button type="button" className="remove-file" onClick={()=>removeFile(fileKey(file))}>Remove</button>
-                      </div>
-                    ))}
+                    {files.map((file)=>{
+                      const key = fileKey(file);
+                      return (
+                        <div key={key} className="file-row">
+                          <div className="file-row-top">
+                            <div className="file-info"><strong>{file.name}</strong><span>{(file.size/1024/1024).toFixed(1)} MB</span></div>
+                            <button type="button" className="remove-file" onClick={()=>removeFile(key)}>Remove</button>
+                          </div>
+                          <div className="file-note-wrap">
+                            <label htmlFor={`note-${key}`}>Notes for this file</label>
+                            <textarea id={`note-${key}`} className="file-note" maxLength="500" value={fileNotes[key] || ''} onChange={(e)=>updateFileNote(key, e.target.value)} placeholder="Optional — add any instructions or details about this attachment" />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
