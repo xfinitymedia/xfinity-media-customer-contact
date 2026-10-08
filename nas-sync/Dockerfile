@@ -3,4 +3,6 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 COPY worker.js ./
-CMD ["npm","start"]
+COPY nas-indexer.js ./
+COPY supervisor.js ./
+CMD ["node","supervisor.js"]
