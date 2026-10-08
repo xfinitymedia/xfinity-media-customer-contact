@@ -39,9 +39,16 @@ function alphabeticalBucket(customerName) {
   return match ? match[0].toUpperCase() : '#';
 }
 
-function expectedNewCustomerPath(customerName) {
-  const folderName = sanitizeSegment(customerName, 'Customer');
-  return path.join(alphabeticalBucket(folderName), folderName);
+function validateNewCustomerPath(relativePath) {
+  if (!relativePath || path.isAbsolute(relativePath)) return null;
+  const normalized = path.normalize(relativePath);
+  const parts = normalized.split(path.sep).filter(Boolean);
+  if (parts.length !== 2) return null;
+  const [bucket, requestedName] = parts;
+  const folderName = sanitizeSegment(requestedName, 'Customer');
+  if (requestedName !== folderName) return null;
+  if (bucket !== alphabeticalBucket(folderName)) return null;
+  return path.join(bucket, folderName);
 }
 
 function safeMappedPath(relativePath) {
@@ -131,9 +138,9 @@ async function resolveCustomerDirectory(upload, customer) {
   if (!resolved) throw new Error('Customer NAS folder has not been confirmed.');
 
   if (upload.routing_create_new) {
-    const expectedRelativePath = expectedNewCustomerPath(customer.name);
-    if (relativePath !== expectedRelativePath) {
-      throw new Error('Requested new customer folder does not match the approved customer path.');
+    const approvedRelativePath = validateNewCustomerPath(relativePath);
+    if (!approvedRelativePath || approvedRelativePath !== relativePath) {
+      throw new Error('Requested new customer folder path is invalid.');
     }
 
     const parentDir = path.dirname(resolved);
