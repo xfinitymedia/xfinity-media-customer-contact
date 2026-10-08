@@ -103,6 +103,23 @@ export default function Page() {
         if (!meta.ok) throw new Error(`Could not register ${file.name}`);
       }
 
+      if (files.length > 0) {
+        const intake = await fetch(`${SUPABASE_URL}/rest/v1/order_intakes`, {
+          method:'POST',
+          headers:{ ...headers, 'Content-Type':'application/json', Prefer:'return=minimal' },
+          body:JSON.stringify({
+            submission_id:payload.id,
+            customer:payload.name,
+            contact_name:payload.contact_name,
+            email:payload.email,
+            phone:payload.phone,
+            address:payload.address,
+            status:'pending'
+          })
+        });
+        if (!intake.ok) throw new Error('Could not create order intake');
+      }
+
       form.reset();
       const uploadedCount = files.length;
       setFiles([]);
