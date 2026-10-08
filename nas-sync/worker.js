@@ -39,6 +39,11 @@ function alphabeticalBucket(customerName) {
   return match ? match[0].toUpperCase() : '#';
 }
 
+function expectedNewCustomerPath(customerName) {
+  const folderName = sanitizeSegment(customerName, 'Customer');
+  return path.join(alphabeticalBucket(folderName), folderName);
+}
+
 function safeMappedPath(relativePath) {
   if (!relativePath || path.isAbsolute(relativePath)) return null;
   const root = path.resolve(NAS_ROOT);
@@ -97,7 +102,7 @@ async function prepareRouting(upload) {
     try {
       const mappedStat = await stat(mapped);
       if (mappedStat.isDirectory()) {
-        await supabase.from('customer_uploads').update({ sync_status: 'pending', routing_path: customer.nas_folder_path, routing_suggestions: [] }).eq('id', upload.id);
+        await supabase.from('customer_uploads').update({ sync_status: 'pending', routing_path: customer.nas_folder_path, routing_create_new: false, routing_suggestions: [] }).eq('id', upload.id);
         return;
       }
     } catch {}
@@ -109,7 +114,7 @@ async function prepareRouting(upload) {
     const selected = exact[0];
     const { error: mapError } = await supabase.from('customers').update({ nas_folder_path: selected.path }).eq('id', customer.id);
     if (mapError) throw mapError;
-    const { error: uploadError } = await supabase.from('customer_uploads').update({ sync_status: 'pending', routing_path: selected.path, routing_suggestions: suggestions }).eq('id', upload.id);
+    const { error: uploadError } = await supabase.from('customer_uploads').update({ sync_status: 'pending', routing_path: selected.path, routing_create_new: false, routing_suggestions: suggestions }).eq('id', upload.id);
     if (uploadError) throw uploadError;
     console.log(`[${upload.id}] exact NAS folder match -> ${selected.path}`);
     return;
@@ -124,8 +129,31 @@ async function resolveCustomerDirectory(upload, customer) {
   const relativePath = upload.routing_path || customer.nas_folder_path;
   const resolved = safeMappedPath(relativePath);
   if (!resolved) throw new Error('Customer NAS folder has not been confirmed.');
-  const resolvedStat = await stat(resolved);
-  if (!resolvedStat.isDirectory()) throw new Error('Confirmed NAS destination is not a directory.');
+
+  if (upload.routing_create_new) {
+    const expectedRelativePath = expectedNewCustomerPath(customer.name);
+    if (relativePath !== expectedRelativePath) {
+      throw new Error('Requested new customer folder does not match the approved customer path.');
+    }
+
+    const parentDir = path.dirname(resolved);
+    await mkdir(parentDir, { recursive: true });
+    try {
+      const existing = await stat(resolved);
+      if (!existing.isDirectory()) throw new Error('New customer destination already exists and is not a directory.');
+    } catch (err) {
+      if (err && err.code === 'ENOENT') {
+        await mkdir(resolved);
+        console.log(`[customer ${customer.id}] created NAS folder -> ${relativePath}`);
+      } else {
+        throw err;
+      }
+    }
+  } else {
+    const resolvedStat = await stat(resolved);
+    if (!resolvedStat.isDirectory()) throw new Error('Confirmed NAS destination is not a directory.');
+  }
+
   if (customer.nas_folder_path !== relativePath) {
     const { error } = await supabase.from('customers').update({ nas_folder_path: relativePath }).eq('id', customer.id);
     if (error) throw error;
@@ -199,7 +227,7 @@ async function pollOnce() {
   }
 
   const { data: pending, error } = await supabase.from('customer_uploads')
-    .select('id,customer_id,order_id,storage_path,file_name,file_size,mime_type,category,created_at,routing_path')
+    .select('id,customer_id,order_id,storage_path,file_name,file_size,mime_type,category,created_at,routing_path,routing_create_new')
     .eq('sync_status', 'pending').order('created_at', { ascending: true }).limit(BATCH_SIZE);
   if (error) throw error;
 
