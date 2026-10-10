@@ -24,6 +24,7 @@ export async function readRequestedFile(nasRoot, folderPath, relativePath) {
     const info = await lstat(target);
     if (info.isSymbolicLink()) throw new Error('Links cannot be opened through XM.');
     if (index < parts.length - 1 && !info.isDirectory()) throw new Error('File path is not a directory.');
+    if (index === parts.length - 1 && !info.isFile()) throw new Error('Only files can be opened.');
     if (index === folderParts.length - 1) customerRoot = await realpath(target);
   }
   const canonical = await realpath(target);
