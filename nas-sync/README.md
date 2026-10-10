@@ -79,3 +79,15 @@ sudo docker compose logs --tail=30
 ```
 
 Test a newly created intake folder by adding a file through Finder after restarting. Existing affected folders require a separate repair.
+
+## Customer folder previews and downloads
+
+The sandbox Customer Folder screen can browse indexed subfolders, preview PDFs and common raster images, and download native files. The `sandbox-nas-file-access` Edge Function authenticates the staff user, checks customer access, and queues a request by indexed file ID. Apply `supabase/nas-file-access.sql` from the backend repository and deploy that function before activating the NAS worker.
+
+The NAS service polls every three seconds using its existing outbound Supabase connection. It validates the current customer mapping and indexed file, rejects symlinks and traversal, and copies the requested bytes into the private `nas-file-access` bucket. It never publishes a NAS HTTP port. Files above 50 MiB use Finder instead.
+
+Temporary copies and request records expire after ten minutes and are removed by the running NAS service. If the NAS is offline, cleanup resumes when it returns. Signed links are valid for at most two minutes and are issued only to the requesting staff user after rechecking customer access. Original NAS files are not modified.
+
+To install a tested NAS update, download `nas-sync/update-file-access.sh` from that exact commit and run `sh update-file-access.sh COMMIT_SHA` in the existing NAS SSH session. The installer stages and syntax-checks all new JavaScript files, backs up the replaced files, rebuilds the container, and restores the prior service if the build fails. The earlier `worker.js` folder-permission fix is retained.
+
+NAS regression tests: `node --test nas-file-access.test.mjs worker-permissions.test.mjs`. Backend/UI regression tests run in the backend repository.

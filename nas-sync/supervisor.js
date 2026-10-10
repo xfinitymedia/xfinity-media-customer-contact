@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { fileAccessLoop } from './nas-file-access.js';
 import { refreshNasIndex } from './nas-indexer.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -27,4 +28,5 @@ async function indexLoop() {
   }
 }
 
-await Promise.race([worker, indexLoop()]);
+await Promise.race([worker, indexLoop(), fileAccessLoop(supabase, NAS_ROOT)]);
+

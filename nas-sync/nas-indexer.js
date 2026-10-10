@@ -6,7 +6,7 @@ async function walkDirectory(customerId, customerDir, currentDir = customerDir) 
   const rows = [];
 
   for (const entry of entries) {
-    if (entry.name.endsWith('.uploading')) continue;
+    if (entry.name.endsWith('.uploading') || entry.isSymbolicLink()) continue;
 
     const absolutePath = path.join(currentDir, entry.name);
     let details;
@@ -98,3 +98,4 @@ export async function refreshNasIndex(supabase, nasRoot) {
 
   console.log(`NAS folder index refreshed for ${indexed} mapped customer${indexed === 1 ? '' : 's'}.`);
 }
+
