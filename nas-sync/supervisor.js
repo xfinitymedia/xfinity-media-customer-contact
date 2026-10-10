@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { fileAccessLoop } from './nas-file-access.js';
+import { refreshFolderCatalog } from './nas-folder-catalog.js';
 import { refreshNasIndex } from './nas-indexer.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -20,6 +21,7 @@ const worker = import('./worker.js');
 async function indexLoop() {
   for (;;) {
     try {
+      await refreshFolderCatalog(supabase, NAS_ROOT);
       await refreshNasIndex(supabase, NAS_ROOT);
     } catch (error) {
       console.error('NAS index failed:', error instanceof Error ? error.message : error);

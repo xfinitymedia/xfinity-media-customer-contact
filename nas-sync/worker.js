@@ -109,7 +109,7 @@ async function prepareRouting(upload) {
     try {
       const mappedStat = await stat(mapped);
       if (mappedStat.isDirectory()) {
-        await supabase.from('customer_uploads').update({ sync_status: 'pending', routing_path: customer.nas_folder_path, routing_create_new: false, routing_suggestions: [] }).eq('id', upload.id);
+        await supabase.from('customer_uploads').update({ sync_status: 'pending', routing_path: customer.nas_folder_path, routing_create_new: false, routing_suggestions: [] }).eq('id', upload.id).eq('sync_status', 'awaiting_routing');
         return;
       }
     } catch {}
@@ -117,17 +117,17 @@ async function prepareRouting(upload) {
 
   const suggestions = await folderSuggestions(customer.name);
   const exact = suggestions.filter(item => normalizeFolderName(item.name) === normalizeFolderName(customer.name));
-  if (exact.length === 1) {
+  if (exact.length === 1 && !customer.nas_folder_path) {
     const selected = exact[0];
-    const { error: mapError } = await supabase.from('customers').update({ nas_folder_path: selected.path }).eq('id', customer.id);
+    const { error: mapError } = await supabase.from('customers').update({ nas_folder_path: selected.path }).eq('id', customer.id).is('nas_folder_path', null);
     if (mapError) throw mapError;
-    const { error: uploadError } = await supabase.from('customer_uploads').update({ sync_status: 'pending', routing_path: selected.path, routing_create_new: false, routing_suggestions: suggestions }).eq('id', upload.id);
+    const { error: uploadError } = await supabase.from('customer_uploads').update({ sync_status: 'pending', routing_path: selected.path, routing_create_new: false, routing_suggestions: suggestions }).eq('id', upload.id).eq('sync_status', 'awaiting_routing');
     if (uploadError) throw uploadError;
     console.log(`[${upload.id}] exact NAS folder match -> ${selected.path}`);
     return;
   }
 
-  const { error: reviewError } = await supabase.from('customer_uploads').update({ routing_suggestions: suggestions }).eq('id', upload.id);
+  const { error: reviewError } = await supabase.from('customer_uploads').update({ routing_suggestions: suggestions }).eq('id', upload.id).eq('sync_status', 'awaiting_routing');
   if (reviewError) throw reviewError;
   console.log(`[${upload.id}] awaiting routing review`);
 }
@@ -178,11 +178,11 @@ async function ensureNasDirectory(directory) {
 }
 
 async function resolveCustomerDirectory(upload, customer) {
-  const relativePath = upload.routing_path || customer.nas_folder_path;
+  const relativePath = customer.nas_folder_path || upload.routing_path;
   const resolved = safeMappedPath(relativePath);
   if (!resolved) throw new Error('Customer NAS folder has not been confirmed.');
 
-  if (upload.routing_create_new) {
+  if (upload.routing_create_new && !customer.nas_folder_path) {
     const approvedRelativePath = validateNewCustomerPath(relativePath);
     if (!approvedRelativePath || approvedRelativePath !== relativePath) {
       throw new Error('Requested new customer folder path is invalid.');
@@ -295,11 +295,11 @@ async function pollOnce() {
 
   for (const upload of pending || []) {
     const { data: claimed, error: claimError } = await supabase.from('customer_uploads')
-      .update({ sync_status: 'syncing', sync_error: null }).eq('id', upload.id).eq('sync_status', 'pending').select('id').maybeSingle();
+      .update({ sync_status: 'syncing', sync_error: null }).eq('id', upload.id).eq('sync_status', 'pending').select('*').maybeSingle();
     if (claimError) { console.error(`[${upload.id}] claim failed:`, claimError.message); continue; }
     if (!claimed) continue;
     try {
-      await syncUpload(upload);
+      await syncUpload(claimed);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[${upload.id}] sync failed:`, message);
@@ -313,3 +313,4 @@ for (;;) {
   try { await pollOnce(); } catch (err) { console.error('Poll failed:', err instanceof Error ? err.message : err); }
   await new Promise(resolve => setTimeout(resolve, POLL_SECONDS * 1000));
 }
+

@@ -6,5 +6,5 @@ COPY worker.js ./
 COPY nas-indexer.js ./
 COPY nas-file-access.js ./
 COPY supervisor.js ./
+COPY nas-folder-catalog.js ./
 CMD ["node","supervisor.js"]
-

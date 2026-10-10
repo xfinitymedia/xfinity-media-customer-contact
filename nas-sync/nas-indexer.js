@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, stat, lstat } from 'node:fs/promises';
 import path from 'node:path';
 
 async function walkDirectory(customerId, customerDir, currentDir = customerDir) {
@@ -42,6 +42,9 @@ async function indexCustomerFolder(supabase, nasRoot, customer) {
   if (!customerDir.startsWith(root + path.sep)) return false;
 
   try {
+    for (const segmentPath of [path.dirname(customerDir), customerDir]) {
+      if ((await lstat(segmentPath)).isSymbolicLink()) return false;
+    }
     const details = await stat(customerDir);
     if (!details.isDirectory()) return false;
   } catch {
@@ -50,33 +53,12 @@ async function indexCustomerFolder(supabase, nasRoot, customer) {
 
   const rows = await walkDirectory(customer.id, customerDir);
 
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabase
-      .from('customer_nas_files')
-      .upsert(rows.slice(i, i + 500), { onConflict: 'customer_id,relative_path' });
-    if (error) throw error;
-  }
+  const { data, error } = await supabase.rpc('replace_customer_nas_index', {
+    p_customer_id: customer.id, p_path: customer.nas_folder_path, p_rows: rows,
+  });
+  if (error) throw error;
+  return data;
 
-  const { data: existing, error: existingError } = await supabase
-    .from('customer_nas_files')
-    .select('id,relative_path')
-    .eq('customer_id', customer.id);
-  if (existingError) throw existingError;
-
-  const currentPaths = new Set(rows.map(row => row.relative_path));
-  const staleIds = (existing || [])
-    .filter(row => !currentPaths.has(row.relative_path))
-    .map(row => row.id);
-
-  for (let i = 0; i < staleIds.length; i += 500) {
-    const { error } = await supabase
-      .from('customer_nas_files')
-      .delete()
-      .in('id', staleIds.slice(i, i + 500));
-    if (error) throw error;
-  }
-
-  return true;
 }
 
 export async function refreshNasIndex(supabase, nasRoot) {
