@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
-import { open, readdir, rename, stat, mkdir } from 'node:fs/promises';
+import { open, readdir, rename, stat, mkdir, chown, chmod, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -132,6 +132,51 @@ async function prepareRouting(upload) {
   console.log(`[${upload.id}] awaiting routing review`);
 }
 
+// New NAS directories follow their parent rather than Docker's user/umask.
+// Existing directories are never changed by the upload worker.
+async function ensureNasDirectory(directory) {
+  const root = path.resolve(NAS_ROOT);
+  const target = path.resolve(directory);
+  if (target !== root && !target.startsWith(root + path.sep)) {
+    throw new Error('NAS directory is outside NAS_ROOT.');
+  }
+  const rootStat = await stat(root);
+  if (!rootStat.isDirectory()) throw new Error('NAS_ROOT is not a directory.');
+  let parent = root;
+  for (const segment of path.relative(root, target).split(path.sep).filter(Boolean)) {
+    const current = path.join(parent, segment);
+    try {
+      const existing = await stat(current);
+      if (!existing.isDirectory()) throw new Error('NAS destination is not a directory.');
+    } catch (err) {
+      if (err?.code !== 'ENOENT') throw err;
+      const parentStat = await stat(parent);
+      try {
+        await mkdir(current, { mode: 0o700 });
+      } catch (createError) {
+        // Another process may have created this directory in the meantime.
+        if (createError?.code !== 'EEXIST') throw createError;
+        if (!(await stat(current)).isDirectory()) throw createError;
+        parent = current;
+        continue;
+      }
+      try {
+        const created = await stat(current);
+        if (created.uid !== parentStat.uid || created.gid !== parentStat.gid) {
+          await chown(current, parentStat.uid, parentStat.gid);
+        }
+        // chmod after chown also restores an inherited setgid bit.
+        await chmod(current, parentStat.mode & 0o2777);
+      } catch (permissionError) {
+        // Do not leave a partially configured empty directory for the next poll.
+        await rmdir(current).catch(() => {});
+        throw permissionError;
+      }
+    }
+    parent = current;
+  }
+}
+
 async function resolveCustomerDirectory(upload, customer) {
   const relativePath = upload.routing_path || customer.nas_folder_path;
   const resolved = safeMappedPath(relativePath);
@@ -144,13 +189,13 @@ async function resolveCustomerDirectory(upload, customer) {
     }
 
     const parentDir = path.dirname(resolved);
-    await mkdir(parentDir, { recursive: true });
+    await ensureNasDirectory(parentDir);
     try {
       const existing = await stat(resolved);
       if (!existing.isDirectory()) throw new Error('New customer destination already exists and is not a directory.');
     } catch (err) {
       if (err && err.code === 'ENOENT') {
-        await mkdir(resolved);
+        await ensureNasDirectory(resolved);
         console.log(`[customer ${customer.id}] created NAS folder -> ${relativePath}`);
       } else {
         throw err;
@@ -178,12 +223,22 @@ async function uniqueDestination(dir, fileName, uploadId) {
 }
 
 async function writeBlobAtomically(blob, destination) {
-  await mkdir(path.dirname(destination), { recursive: true });
+  await ensureNasDirectory(path.dirname(destination));
+  const directoryStat = await stat(path.dirname(destination));
   const tempPath = `${destination}.uploading`;
   const buffer = Buffer.from(await blob.arrayBuffer());
   const hash = createHash('sha256').update(buffer).digest('hex');
   const handle = await open(tempPath, 'w');
-  try { await handle.writeFile(buffer); await handle.sync(); } finally { await handle.close(); }
+  try {
+    await handle.writeFile(buffer);
+    const created = await handle.stat();
+    if (created.uid !== directoryStat.uid || created.gid !== directoryStat.gid) {
+      await handle.chown(directoryStat.uid, directoryStat.gid);
+    }
+    // Uploaded documents need the parent's read/write access, not execute bits.
+    await handle.chmod(directoryStat.mode & 0o666);
+    await handle.sync();
+  } finally { await handle.close(); }
   await rename(tempPath, destination);
   const saved = await stat(destination);
   if (saved.size !== buffer.length) throw new Error('File verification failed after NAS write.');
