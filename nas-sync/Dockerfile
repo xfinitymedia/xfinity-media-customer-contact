@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 COPY worker.js ./
+COPY customer-folder-writer.mjs ./
 COPY nas-indexer.js ./
 COPY nas-file-access.js ./
 COPY supervisor.js ./

@@ -1,3 +1,4 @@
+import {pollCustomerNasUploads} from './customer-folder-writer.mjs';
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { open, readdir, rename, stat, mkdir, chown, chmod, rmdir } from 'node:fs/promises';
@@ -310,7 +311,8 @@ async function pollOnce() {
 
 console.log(`Xfinity NAS sync started. Root: ${NAS_ROOT}. Poll: ${POLL_SECONDS}s.`);
 for (;;) {
-  try { await pollOnce(); } catch (err) { console.error('Poll failed:', err instanceof Error ? err.message : err); }
+  try { await pollOnce();
+    await pollCustomerNasUploads(supabase,NAS_ROOT); } catch (err) { console.error('Poll failed:', err instanceof Error ? err.message : err); }
   await new Promise(resolve => setTimeout(resolve, POLL_SECONDS * 1000));
 }
 
