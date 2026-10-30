@@ -1,21 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 const SUPABASE_URL = 'https://tewiyvnftjowcplnhdce.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_6TK07QQyLZWGGj1ZZpbkvg_mTXGheF2';
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = ['pdf','png','jpg','jpeg','webp','svg','ai','eps','zip'];
 
-function safeFileName(name) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180);
-}
-
 function fileKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`;
 }
 
 export default function Page() {
+  const submission = useRef(null);
   const [status, setStatus] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [files, setFiles] = useState([]);
@@ -44,11 +41,12 @@ export default function Page() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (submitting) return;
     setStatus(null);
     const form = event.currentTarget;
     const data = new FormData(form);
     const payload = {
-      id: crypto.randomUUID(),
+
       name: String(data.get('name') || '').trim(),
       contact_name: String(data.get('contact_name') || '').trim() || null,
       email: String(data.get('email') || '').trim().toLowerCase() || null,
@@ -60,71 +58,40 @@ export default function Page() {
     if (!payload.name) return setStatus({ ok:false, message:'Please enter your name or business name.' });
     if (!payload.email && !payload.phone) return setStatus({ ok:false, message:'Please provide an email address or phone number.' });
 
+    if (files.length > 10 || files.reduce((total, file) => total + file.size, 0) > MAX_FILE_SIZE) return setStatus({ ok:false, message:'Choose up to 10 files, totalling 25 MB or less.' });
     for (const file of files) {
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
       if (!ALLOWED_EXTENSIONS.includes(ext)) return setStatus({ ok:false, message:`${file.name}: unsupported file type.` });
+      if (!file.size || file.name.length > 180) return setStatus({ ok:false, message:`${file.name}: choose a non-empty file with a shorter name.` });
       if (file.size > MAX_FILE_SIZE) return setStatus({ ok:false, message:`${file.name}: files must be 25 MB or smaller.` });
     }
 
     setSubmitting(true);
     try {
-      const headers = { apikey: SUPABASE_PUBLISHABLE_KEY };
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/customer_contact_submissions`, {
-        method:'POST',
-        headers:{ ...headers, 'Content-Type':'application/json', Prefer:'return=minimal' },
-        body:JSON.stringify(payload)
+      if (!submission.current) submission.current = {
+        id: crypto.randomUUID(),
+        token: Array.from(crypto.getRandomValues(new Uint8Array(32)), value => value.toString(16).padStart(2, '0')).join('')
+      };
+      const body = new FormData();
+      for (const [key, value] of Object.entries(payload)) body.append(key, value || '');
+      body.append('submission_id', submission.current.id);
+      body.append('access_token', submission.current.token);
+      body.append('file_notes', JSON.stringify(files.map(file => String(fileNotes[fileKey(file)] || '').trim())));
+      for (const file of files) body.append('files', file);
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/qr-customer-intake`, {
+        method:'POST', headers:{ apikey: SUPABASE_PUBLISHABLE_KEY }, body
       });
-      if (!response.ok) throw new Error('Contact submission failed');
-
-      for (const file of files) {
-        const key = fileKey(file);
-        const path = `${payload.id}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
-        const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/customer-uploads/${encodeURIComponent(path).replace(/%2F/g,'/')}`, {
-          method:'POST',
-          headers:{ ...headers, 'Content-Type':file.type || 'application/octet-stream', 'x-upsert':'false' },
-          body:file
-        });
-        if (!upload.ok) throw new Error(`Could not upload ${file.name}`);
-
-        const meta = await fetch(`${SUPABASE_URL}/rest/v1/customer_uploads`, {
-          method:'POST',
-          headers:{ ...headers, 'Content-Type':'application/json', Prefer:'return=minimal' },
-          body:JSON.stringify({
-            submission_id:payload.id,
-            storage_path:path,
-            file_name:file.name,
-            file_size:file.size,
-            mime_type:file.type || null,
-            notes:String(fileNotes[key] || '').trim() || null,
-            category:'Customer Uploads',
-            sync_status:'pending'
-          })
-        });
-        if (!meta.ok) throw new Error(`Could not register ${file.name}`);
-      }
-
-      const intake = await fetch(`${SUPABASE_URL}/rest/v1/order_intakes`, {
-        method:'POST',
-        headers:{ ...headers, 'Content-Type':'application/json', Prefer:'return=minimal' },
-        body:JSON.stringify({
-          submission_id:payload.id,
-          customer:payload.name,
-          contact_name:payload.contact_name,
-          email:payload.email,
-          phone:payload.phone,
-          address:payload.address,
-          status:'pending'
-        })
-      });
-      if (!intake.ok) throw new Error('Could not create order intake');
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'We could not complete your submission. Please try again or contact Xfinity Media.');
+      submission.current = null;
 
       form.reset();
       const uploadedCount = files.length;
       setFiles([]);
       setFileNotes({});
       setStatus({ ok:true, message:uploadedCount ? `Thank you — your contact details and ${uploadedCount} file${uploadedCount === 1 ? '' : 's'} have been submitted.` : 'Thank you — your contact details have been submitted.' });
-    } catch {
-      setStatus({ ok:false, message:'We could not complete your submission. Please try again or contact Xfinity Media.' });
+    } catch (error) {
+      setStatus({ ok:false, message:error.message || 'We could not complete your submission. Please try again or contact Xfinity Media.' });
     } finally {
       setSubmitting(false);
     }
@@ -146,7 +113,7 @@ export default function Page() {
             <div className="full upload-field">
               <label htmlFor="files">Upload Artwork / Files</label>
               <input id="files" name="files" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.svg,.ai,.eps,.zip" onChange={(e)=>{ addFiles(e.target.files); e.target.value=''; }} />
-              <div className="hint">Optional. Select multiple files at once, or choose files again to add more. PDF, PNG, JPG, SVG, AI, EPS or ZIP. Maximum 25 MB per file.</div>
+              <div className="hint">Optional. Select multiple files at once, or choose files again to add more. PDF, PNG, JPG, SVG, AI, EPS or ZIP. Up to 10 files, totalling 25 MB or less.</div>
               {files.length > 0 && (
                 <div className="selected-files">
                   <div className="selected-files-header">{files.length} file{files.length === 1 ? '' : 's'} selected</div>
