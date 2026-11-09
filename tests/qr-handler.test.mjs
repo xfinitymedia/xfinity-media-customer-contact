@@ -16,7 +16,7 @@ function request({fields={},files=[],method='POST',site=origin,type,declared}={}
  return new Request('https://api.invalid/qr-customer-intake',{method,headers,...(method==='POST'?{body}:{})});
 }
 test('contact-only uses existing reservation + atomic commit and returns no private data',async()=>{
- const f=fixture(),r=await f.handler(request());assert.equal(r.status,200);assert.deepEqual(await r.json(),{ok:true});
+ const f=fixture(),r=await f.handler(request());assert.equal(r.status,200);assert.equal(JSON.stringify(await r.json()),JSON.stringify({ok:true}));
  assert.deepEqual(f.calls.map(c=>c.name),['reserve_qr_intake','customer_intake_link_state','commit_qr_intake','finish_qr_intake']);
  assert.equal(f.calls[0].args.p_ip_hash.length,64);assert.notEqual(f.calls[0].args.p_ip_hash,'192.0.2.1');
  assert.equal(f.calls[2].args.p_files.length,0);
@@ -42,3 +42,34 @@ for(const [label,options] of [
 for(const fail of ['customer_intake_link_state','upload','commit_qr_intake'])test(fail+' failure never reports success and releases lease',async()=>{const f=fixture({fail});const r=await f.handler(request({files:[new File(['x'],'art.png')]}));assert.equal(r.status,400);assert.notEqual((await r.json()).ok,true);assert.equal(f.calls.at(-1).name,'finish_qr_intake');});
 test('identical file retry reuses digest path safely',async()=>{const f=fixture({duplicate:true});assert.equal((await f.handler(request({files:[new File(['x'],'art.png')]}))).status,200);});
 test('OPTIONS only allows the printed QR origin',async()=>{const f=fixture();const r=await f.handler(request({method:'OPTIONS'}));assert.equal(r.status,204);assert.equal(r.headers.get('access-control-allow-origin'),origin);assert.equal(f.calls.length,0);});
+test('same photo selected twice commits once and uploads once',async()=>{
+ const f=fixture(),photo=new File(['photo-bytes'],'20261109_121858.jpg',{type:'image/jpeg'});
+ assert.equal((await f.handler(request({files:[photo,photo]}))).status,200);
+ assert.equal(f.calls.filter(c=>c.name==='upload').length,1);
+ const entries=f.calls.find(c=>c.name==='commit_qr_intake').args.p_files;
+ assert.equal(entries.length,1);assert.equal(entries[0].file_name,photo.name);
+});
+test('ten repeated photos commit once',async()=>{
+ const f=fixture(),photo=new File(['photo'],'art.jpg');
+ assert.equal((await f.handler(request({files:Array(10).fill(photo)}))).status,200);
+ assert.equal(f.calls.find(c=>c.name==='commit_qr_intake').args.p_files.length,1);
+});
+test('same photo with distinct notes preserves every note with unique paths',async()=>{
+ const f=fixture(),photo=new File(['photo'],'art.jpg');
+ assert.equal((await f.handler(request({files:[photo,photo,photo],fields:{file_notes:JSON.stringify(['front','back','front'])}}))).status,200);
+ const entries=f.calls.find(c=>c.name==='commit_qr_intake').args.p_files;
+ assert.deepEqual(entries.map(e=>e.notes),['front','back']);assert.equal(new Set(entries.map(e=>e.storage_path)).size,2);
+});
+test('same filename with different photo bytes keeps both',async()=>{
+ const f=fixture();assert.equal((await f.handler(request({files:[new File(['a'],'art.jpg'),new File(['b'],'art.jpg')]}))).status,200);
+ const entries=f.calls.find(c=>c.name==='commit_qr_intake').args.p_files;assert.equal(entries.length,2);assert.notEqual(entries[0].storage_path,entries[1].storage_path);
+});
+test('sanitized filename collisions keep unique paths and original names',async()=>{
+ const f=fixture();assert.equal((await f.handler(request({files:[new File(['a'],'art?.jpg'),new File(['a'],'art*.jpg')]}))).status,200);
+ const entries=f.calls.find(c=>c.name==='commit_qr_intake').args.p_files;assert.equal(entries.length,2);assert.equal(new Set(entries.map(e=>e.storage_path)).size,2);assert.deepEqual(entries.map(e=>e.file_name),['art?.jpg','art*.jpg']);
+});
+test('duplicates retry safely against already uploaded objects',async()=>{
+ const f=fixture({duplicate:true}),photo=new File(['photo'],'art.jpg');
+ for(let i=0;i<2;i++)assert.equal((await f.handler(request({files:[photo,photo]}))).status,200);
+ const commits=f.calls.filter(c=>c.name==='commit_qr_intake');assert.equal(commits.length,2);assert.deepEqual(commits[0].args.p_files,commits[1].args.p_files);assert.equal(commits[0].args.p_files.length,1);
+});

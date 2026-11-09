@@ -1,6 +1,7 @@
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
+import {validateContact,failureStatus,keepOpenText} from '../app/intakeMessages.js';
 import {test} from 'node:test';
 import {webcrypto} from 'node:crypto';
 const source=readFileSync(new URL('../app/page.js',import.meta.url),'utf8');
@@ -13,7 +14,7 @@ function fixture({fields={},files=[],fail=false,network=false,submitting=false}=
   get(key){return this.values.get(key);}
   append(key,value){if(key==='files')this.files.push(value);else this.values.set(key,value);}
  }
- const context=vm.createContext({files,fileNotes:Object.fromEntries(files.map(f=>[`${f.name}-${f.size}-${f.lastModified}`,' File note '])),submission,submitting,crypto:webcrypto,FormData:TestFormData,
+ const context=vm.createContext({validateContact,failureStatus,keepOpenText,files,fileNotes:Object.fromEntries(files.map(f=>[`${f.name}-${f.size}-${f.lastModified}`,' File note '])),submission,submitting,crypto:webcrypto,FormData:TestFormData,
  fetch:async(url,options)=>{calls.push({url,...options});if(network)throw new Error('Network failed');return {ok:!fail,json:async()=>fail?{error:'Please try again.'}:{ok:true}};},
  setStatus:v=>statuses.push(v),setSubmitting:v=>busy.push(v),setFiles:v=>resets.push(v),setFileNotes:v=>resets.push(v)});
  vm.runInContext(`${setup}\n${handler}\nglobalThis.submit=handleSubmit`,context);
@@ -37,3 +38,6 @@ for(const [label,opts] of [
 ])test(label+' validation prevents all requests',async()=>{const f=fixture(opts);await f.submit();assert.equal(f.calls.length,0);assert.equal(f.statuses.at(-1).ok,false);});
 test('phone-only works',async()=>{const f=fixture({fields:{email:'',phone:'6045550100'}});await f.submit();assert.equal(f.statuses.at(-1).ok,true);});
 test('busy submission prevents another request',async()=>{const f=fixture({submitting:true});await f.submit();assert.equal(f.calls.length,0);});
+
+test('connection failure retains form, files and submission identity with clear guidance',async()=>{const f=fixture({network:true,files:[file]});await f.submit();assert.match(f.statuses.at(-1).message,/couldn’t confirm/);assert.equal(f.resets.length,0);assert.ok(f.submission.current);});
+test('frontend renders errors at bottom and uses its own validation',()=>{assert.match(source,/<form onSubmit=\{handleSubmit\} noValidate>/);assert.match(source,/keepOpenText/);});

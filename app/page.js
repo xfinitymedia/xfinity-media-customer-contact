@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import {validateContact,failureStatus,keepOpenText} from './intakeMessages';
 
 const SUPABASE_URL = 'https://tewiyvnftjowcplnhdce.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_6TK07QQyLZWGGj1ZZpbkvg_mTXGheF2';
@@ -55,16 +56,8 @@ export default function Page() {
       website: String(data.get('website') || '')
     };
 
-    if (!payload.name) return setStatus({ ok:false, message:'Please enter your name or business name.' });
-    if (!payload.email && !payload.phone) return setStatus({ ok:false, message:'Please provide an email address or phone number.' });
-
-    if (files.length > 10 || files.reduce((total, file) => total + file.size, 0) > MAX_FILE_SIZE) return setStatus({ ok:false, message:'Choose up to 10 files, totalling 25 MB or less.' });
-    for (const file of files) {
-      const ext = file.name.split('.').pop()?.toLowerCase() || '';
-      if (!ALLOWED_EXTENSIONS.includes(ext)) return setStatus({ ok:false, message:`${file.name}: unsupported file type.` });
-      if (!file.size || file.name.length > 180) return setStatus({ ok:false, message:`${file.name}: choose a non-empty file with a shorter name.` });
-      if (file.size > MAX_FILE_SIZE) return setStatus({ ok:false, message:`${file.name}: files must be 25 MB or smaller.` });
-    }
+    const validation=validateContact(payload,files,fileNotes);
+    if(validation)return setStatus({ok:false,message:validation});
 
     setSubmitting(true);
     try {
@@ -82,7 +75,7 @@ export default function Page() {
         method:'POST', headers:{ apikey: SUPABASE_PUBLISHABLE_KEY }, body
       });
       const result = await response.json();
-      if (!response.ok || !result.ok) throw new Error(result.error || 'We could not complete your submission. Please try again or contact Xfinity Media.');
+      if (!response.ok || !result.ok) throw {intakeStatus:failureStatus(result)};
       submission.current = null;
 
       form.reset();
@@ -91,7 +84,7 @@ export default function Page() {
       setFileNotes({});
       setStatus({ ok:true, message:uploadedCount ? `Thank you — your contact details and ${uploadedCount} file${uploadedCount === 1 ? '' : 's'} have been submitted.` : 'Thank you — your contact details have been submitted.' });
     } catch (error) {
-      setStatus({ ok:false, message:error.message || 'We could not complete your submission. Please try again or contact Xfinity Media.' });
+      setStatus(error.intakeStatus || failureStatus(null));
     } finally {
       setSubmitting(false);
     }
@@ -103,7 +96,7 @@ export default function Page() {
       <section className="card">
         <h1>Share your contact details</h1>
         <p>Fill this out once and our team will have your information ready for quotes, orders and invoices. You can also send us artwork or other order files.</p>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <div className="grid">
             <div className="full"><label htmlFor="name">Customer / Company Name *</label><input id="name" name="name" maxLength="150" required autoComplete="organization" placeholder="Your name or business name" /></div>
             <div><label htmlFor="contact_name">Contact Name</label><input id="contact_name" name="contact_name" maxLength="150" autoComplete="name" placeholder="Main contact" /></div>
@@ -113,7 +106,7 @@ export default function Page() {
             <div className="full upload-field">
               <label htmlFor="files">Upload Artwork / Files</label>
               <input id="files" name="files" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.svg,.ai,.eps,.zip" onChange={(e)=>{ addFiles(e.target.files); e.target.value=''; }} />
-              <div className="hint">Optional. Select multiple files at once, or choose files again to add more. PDF, PNG, JPG, SVG, AI, EPS or ZIP. Up to 10 files, totalling 25 MB or less.</div>
+              <div className="hint">Optional. Select multiple files at once, or choose files again to add more. PDF, PNG, JPG, WEBP, SVG, AI, EPS or ZIP. Up to 10 files, totalling 25 MB or less.</div>
               {files.length > 0 && (
                 <div className="selected-files">
                   <div className="selected-files-header">{files.length} file{files.length === 1 ? '' : 's'} selected</div>
@@ -140,10 +133,11 @@ export default function Page() {
             <div className="hidden" aria-hidden="true"><label htmlFor="website">Website</label><input id="website" name="website" tabIndex="-1" autoComplete="off" /></div>
           </div>
           <button type="submit" disabled={submitting}>{submitting ? 'Submitting…' : files.length ? `Submit Contact Details & ${files.length} File${files.length === 1 ? '' : 's'}` : 'Submit Contact Details'}</button>
-          {status && <div className={`status ${status.ok ? 'ok' : 'err'}`} role="status" aria-live="polite">{status.message}</div>}
+          {status && <div className={`status ${status.ok ? 'ok' : 'err'}`} role="status" aria-live="polite"><p>{status.message}</p>{!status.ok&&!status.restart&&<p>{keepOpenText}</p>}</div>}
         </form>
       </section>
       <div className="fine">Your information and uploaded files are sent securely to Xfinity Media and are not displayed publicly.</div>
     </main>
   );
 }
+
